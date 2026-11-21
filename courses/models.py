@@ -1,0 +1,655 @@
+from django.db import models
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.utils import timezone
+from datetime import timedelta
+
+
+# --- SPRINT A & B & C: GAMIFICATION PROFILE & LEDGER ---
+
+class UserProfile(models.Model):
+    PLAN_CHOICES = [
+        ("free", "StudyQuest Free"),
+        ("plus", "StudyQuest Plus"),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    total_xp = models.IntegerField(default=0)
+    current_level = models.IntegerField(default=1)
+    streak_days = models.IntegerField(default=0)
+    last_study_date = models.DateField(null=True, blank=True)
+    plan = models.CharField(max_length=20, choices=PLAN_CHOICES, default="free")
+    last_course_generated_at = models.DateTimeField(null=True, blank=True)
+    bonus_course_credits = models.PositiveIntegerField(default=0)
+    best_streak_days = models.IntegerField(default=0)
+    last_opened_course = models.ForeignKey(
+        "Course", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    last_opened_chapter = models.ForeignKey(
+        "Chapter", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+    def award_xp(self, amount, reason):
+        XPTransaction.objects.create(user=self.user, amount=amount, reason=reason)
+        self.total_xp += amount
+        xp_for_next_level = self.current_level * 100
+        while self.total_xp >= xp_for_next_level:
+            self.current_level += 1
+            xp_for_next_level = self.current_level * 100
+        self.save(update_fields=['total_xp', 'current_level'])
+
+    def update_streak(self):
+        today = timezone.now().date()
+        if self.last_study_date == today:
+            return
+        elif self.last_study_date == today - timedelta(days=1):
+            self.streak_days += 1
+        else:
+            self.streak_days = 1
+
+        if self.streak_days > self.best_streak_days:
+            self.best_streak_days = self.streak_days
+
+        self.last_study_date = today
+        self.save(update_fields=['streak_days', 'last_study_date', 'best_streak_days'])
+
+    def record_study_activity(self):
+        self.update_streak()
+
+    def __str__(self):
+        return f"{self.user.username} - Lv. {self.current_level} ({self.total_xp} XP)"
+
+
+@receiver(post_save, sender=User)
+def create_or_update_user_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.create(user=instance)
+
+
+# --- EXISTING MODELS ---
+
+class Course(models.Model):
+    """A subject/course the learner wants a personalized review journey for."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='courses')
+
+    STATUS_CHOICES = [
+        ("processing", "Processing"),
+        ("active", "Active"),
+        ("archived", "Archived"),
+        ("failed", "Failed"),
+    ]
+
+    title = models.CharField(max_length=200)
+    description = models.CharField(max_length=300, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
+
+    syllabus_text = models.TextField(blank=True)
+    modules_text = models.TextField(blank=True)
+    activities_text = models.TextField(blank=True)
+    assignments_text = models.TextField(blank=True)
+
+    structured_content = models.JSONField(blank=True, null=True)
+
+    # --- ASYNC GENERATION STATE (Course Forge) ---
+    # Learner-facing failure text. Never contains provider internals or secrets.
+    generation_error = models.TextField(blank=True, default="")
+    generation_stage = models.CharField(max_length=40, blank=True, default="")
+    generation_started_at = models.DateTimeField(null=True, blank=True)
+    generation_completed_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title
+
+
+class Chapter(models.Model):
+    """One step in a course's learning path (a NetAcad-style review unit)."""
+
+    course = models.ForeignKey(Course, related_name='chapters', on_delete=models.CASCADE)
+    order = models.PositiveIntegerField(default=1)
+    title = models.CharField(max_length=200)
+    review_content = models.TextField(
+        blank=True,
+        help_text='Personalized review text for this chapter, generated from the raw materials.',
+    )
+    source_data = models.JSONField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['order']
+
+    def __str__(self):
+        return f'{self.course.title} — {self.title}'
+
+
+class Quiz(models.Model):
+    """The knowledge-check at the end of a chapter."""
+
+    chapter = models.OneToOneField(Chapter, related_name='quiz', on_delete=models.CASCADE)
+    title = models.CharField(max_length=200, blank=True)
+
+    def __str__(self):
+        return self.title or f'Quiz for {self.chapter.title}'
+
+
+# courses/models.py
+class Question(models.Model):
+    QUESTION_TYPE_CHOICES = [
+        ("multiple_choice", "Multiple Choice"),
+        ("true_false", "True or False"),
+        ("identification", "Identification"),
+        ("enumeration", "Enumeration"),
+    ]
+
+    quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, related_name="questions")
+    order = models.PositiveIntegerField(default=1)
+    question_type = models.CharField(
+        max_length=30,
+        choices=QUESTION_TYPE_CHOICES,
+        default="multiple_choice",
+    )
+    text = models.TextField()
+    explanation = models.TextField(blank=True, default="")
+    answer_data = models.JSONField(default=dict, blank=True)
+    topics = models.ManyToManyField(
+        "CourseTopic",
+        through="QuestionTopic",
+        related_name="questions",
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["order"]
+
+    def max_points(self):
+        if self.question_type == "enumeration":
+            return len(self.answer_data.get("expected_items", []))
+        return 1
+
+    def __str__(self):
+        return f"Q{self.order} ({self.question_type}): {self.text[:40]}"
+
+
+class Choice(models.Model):
+    """Only used for question_type='multiple_choice'. Identification and
+    Enumeration questions have no related Choice rows.
+    """
+    question = models.ForeignKey(Question, related_name='choices', on_delete=models.CASCADE)
+    text = models.CharField(max_length=300)
+    is_correct = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.text
+
+
+# --- TOPIC EVIDENCE & TAXONOMY (TE-1A) ---
+
+class CourseTopic(models.Model):
+    """A learning topic or concept strictly scoped to a single Course.
+
+    Topics represent conceptual units within the course material (e.g., 'market-validation',
+    'customer-discovery') rather than global skills.
+    """
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="topics",
+    )
+    key = models.SlugField(max_length=140)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    order = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["course", "key"],
+                name="unique_course_topic_key",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.course.title}: {self.name} ({self.key})"
+
+
+class QuestionTopic(models.Model):
+    """Associates a quiz Question with a CourseTopic from the same course."""
+
+    question = models.ForeignKey(
+        Question,
+        on_delete=models.CASCADE,
+        related_name="topic_links",
+    )
+    topic = models.ForeignKey(
+        CourseTopic,
+        on_delete=models.CASCADE,
+        related_name="question_links",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["question", "topic"],
+                name="unique_question_topic",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.question_id and self.topic_id:
+            try:
+                question_course_id = self.question.quiz.chapter.course_id
+            except (AttributeError, Quiz.DoesNotExist, Chapter.DoesNotExist):
+                question_course_id = None
+
+            topic_course_id = self.topic.course_id
+            if question_course_id != topic_course_id:
+                raise ValidationError(
+                    "A Question can only be linked to a CourseTopic belonging to the same Course."
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Q{self.question_id} -> {self.topic.name}"
+
+
+# --- SPRINT B: QUIZ PERSISTENCE & XP LEDGER ---
+
+class XPTransaction(models.Model):
+    """An audit-trail entry for every XP award. UserProfile.total_xp is a
+    cached sum of these — never edit total_xp directly, always go through
+    UserProfile.award_xp() so the ledger and the cached total can't drift.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='xp_transactions')
+    amount = models.IntegerField()
+    reason = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.user.username}: {self.amount:+d} XP ({self.reason})'
+
+
+class QuizAttempt(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='quiz_attempts')
+    quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, related_name='attempts')
+    score = models.FloatField(default=0)
+    total_questions = models.IntegerField(default=0)
+    xp_earned = models.IntegerField(default=0)
+    completed_at = models.DateTimeField(auto_now_add=True)
+    # Ensure this line is present and saved:
+    review_data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-completed_at']
+
+    def __str__(self):
+        return f'{self.user.username} — {self.quiz} ({self.score}/{self.total_questions})'
+
+
+class ChapterCompletion(models.Model):
+    """Tracks that a user has marked a chapter's review content as read.
+    Existence of this row = "Mark Complete" was pressed; used both to
+    show the ✓ state and to prevent awarding the completion XP more
+    than once per user per chapter.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chapter_completions')
+    chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='completions')
+    completed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'chapter')
+
+    def __str__(self):
+        return f'{self.user.username} — {self.chapter.title} (read)'
+
+
+class CourseCreditTransaction(models.Model):
+    TRANSACTION_TYPES = [
+        ("weekly_spend", "Weekly Credit Spent"),
+        ("bonus_award", "Completion Bonus Awarded"),
+        ("bonus_spend", "Bonus Credit Spent"),
+        ("admin_adjustment", "Admin Adjustment"),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="course_credit_transactions")
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
+    amount = models.SmallIntegerField()
+    related_course = models.ForeignKey(Course, null=True, blank=True, on_delete=models.SET_NULL, related_name="credit_transactions")
+    reference_key = models.CharField(max_length=150, null=True, blank=True, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class UserCourseCompletion(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="course_completions")
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="user_completions")
+    completed_at = models.DateTimeField(auto_now_add=True)
+    bonus_credit_awarded = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "course"], name="unique_user_course_completion"),
+        ]
+
+
+# --- DIAGNOSTIC FOCUS & EXTERNAL ASSESSMENT INTEGRATION ---
+
+class LearningFocus(models.Model):
+    """Represents a student's targeted learning emphasis, either manually selected
+
+    or imported from an institutional academic diagnostic system.
+    """
+    SOURCE_MANUAL = "manual"
+    SOURCE_EXTERNAL = "external_assessment"
+    SOURCE_STUDYQUEST = "studyquest"
+
+    SOURCE_CHOICES = [
+        (SOURCE_MANUAL, "Manual Selection"),
+        (SOURCE_EXTERNAL, "External Assessment"),
+        (SOURCE_STUDYQUEST, "StudyQuest Activity"),
+    ]
+
+    STATUS_PENDING = "pending"
+    STATUS_ACTIVE = "active"
+    STATUS_COMPLETED = "completed"
+    STATUS_DISMISSED = "dismissed"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending Review"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_DISMISSED, "Dismissed"),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="learning_focuses",
+    )
+    source = models.CharField(
+        max_length=32,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_MANUAL,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    subject_code = models.CharField(
+        max_length=64,
+        blank=True,
+    )
+    subject_name = models.CharField(
+        max_length=255,
+    )
+    topic_names = models.JSONField(
+        default=list,
+        blank=True,
+    )
+    initial_score = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="Diagnostic assessment score percentage (e.g. 58.0)",
+    )
+    source_payload = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+    external_assessment_id = models.CharField(
+        max_length=255,
+        blank=True,
+        db_index=True,
+    )
+    linked_course = models.ForeignKey(
+        Course,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="learning_focuses",
+    )
+    assessed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "external_assessment_id"],
+                condition=models.Q(source="external_assessment") & ~models.Q(external_assessment_id=""),
+                name="unique_user_external_assessment_id",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} Focus: {self.subject_name} ({self.status})"
+
+
+# --- SPRINT TE-3B: STARTING KNOWLEDGE CHECK ---
+
+class StartingKnowledgeCheck(models.Model):
+    """Optional diagnostic assessment offered once per course to establish a baseline.
+
+    Uses existing validated, topic-tagged questions from the course.
+    Does NOT affect course grades or progression.
+    """
+    STATUS_OFFERED = "offered"
+    STATUS_DISMISSED = "dismissed"
+    STATUS_COMPLETED = "completed"
+
+    STATUS_CHOICES = [
+        (STATUS_OFFERED, "Offered"),
+        (STATUS_DISMISSED, "Dismissed"),
+        (STATUS_COMPLETED, "Completed"),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="knowledge_checks",
+    )
+    course = models.OneToOneField(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="starting_knowledge_check",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_OFFERED,
+    )
+
+    question_ids = models.JSONField(
+        default=list,
+        blank=True,
+    )
+    answers = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+    score = models.FloatField(
+        default=0.0,
+    )
+    total_questions = models.IntegerField(
+        default=0,
+    )
+    topic_evidence = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+    suggested_topic_keys = models.JSONField(
+        default=list,
+        blank=True,
+    )
+    focus_adopted = models.BooleanField(
+        default=False,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.username} Knowledge Check for {self.course.title} ({self.status})"
+
+# --- ASYNC COURSE GENERATION (COURSE FORGE) ---
+
+class CourseGenerationJob(models.Model):
+    """A durable unit of course-generation work.
+
+    Two state machines are deliberately kept separate:
+
+    * This job tracks *worker execution* (queued -> running -> succeeded/failed).
+    * ``Course.status`` tracks *course availability* (processing -> active/failed).
+
+    A job row is what makes generation survive a refresh, a tab close, or a
+    process restart. ``source_bundle`` holds the already-extracted study text,
+    so a worker never needs the original ``UploadedFile`` objects -- those are
+    destroyed when the originating request ends.
+    """
+
+    STATUS_QUEUED = "queued"
+    STATUS_RUNNING = "running"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_INTERRUPTED = "interrupted"
+
+    STATUS_CHOICES = [
+        (STATUS_QUEUED, "Queued"),
+        (STATUS_RUNNING, "Running"),
+        (STATUS_SUCCEEDED, "Succeeded"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_CANCELLED, "Cancelled"),
+        (STATUS_INTERRUPTED, "Interrupted"),
+    ]
+
+    # Honest stages only. No fabricated percentages.
+    STAGE_QUEUED = "queued"
+    STAGE_READING_SOURCES = "reading_sources"
+    STAGE_PREPARING_CONTENT = "preparing_content"
+    STAGE_GENERATING_COURSE = "generating_course"
+    STAGE_VALIDATING_COURSE = "validating_course"
+    STAGE_SAVING_COURSE = "saving_course"
+    STAGE_COMPLETE = "complete"
+    STAGE_FAILED = "failed"
+
+    STAGE_CHOICES = [
+        (STAGE_QUEUED, "Queued"),
+        (STAGE_READING_SOURCES, "Reading source materials"),
+        (STAGE_PREPARING_CONTENT, "Preparing the course structure"),
+        (STAGE_GENERATING_COURSE, "Generating lessons and assessments"),
+        (STAGE_VALIDATING_COURSE, "Checking the generated content"),
+        (STAGE_SAVING_COURSE, "Saving your course"),
+        (STAGE_COMPLETE, "Course ready"),
+        (STAGE_FAILED, "Generation failed"),
+    ]
+
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="generation_jobs",
+    )
+    attempt_id = models.UUIDField(unique=True, editable=False)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_QUEUED,
+        db_index=True,
+    )
+    stage = models.CharField(
+        max_length=40,
+        choices=STAGE_CHOICES,
+        default=STAGE_QUEUED,
+    )
+
+    # Extracted, self-contained study text. The worker never touches uploads.
+    source_bundle = models.JSONField(default=dict, blank=True)
+
+    # Inputs the worker needs that are not derivable from the course row.
+    generation_profile = models.JSONField(default=dict, blank=True)
+    custom_title = models.CharField(max_length=200, blank=True, default="")
+    study_focus = models.CharField(max_length=100, blank=True, default="")
+    plan_name = models.CharField(max_length=20, blank=True, default="free")
+
+    queued_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    claimed_by = models.CharField(max_length=120, blank=True, default="")
+
+    retry_count = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=60, blank=True, default="")
+    # Learner-safe text only. Never provider prompts or raw API errors.
+    error_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["queued_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["course", "attempt_id"],
+                name="unique_course_generation_attempt",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["status", "queued_at"]),
+        ]
+
+    def __str__(self):
+        return f"Job {self.attempt_id} for {self.course_id} ({self.status})"
+
+    @property
+    def is_finished(self):
+        return self.status in {
+            self.STATUS_SUCCEEDED,
+            self.STATUS_FAILED,
+            self.STATUS_CANCELLED,
+            self.STATUS_INTERRUPTED,
+        }
+
+    def learner_stage_message(self):
+        """Learner-facing stage text. Never exposes internal implementation."""
+        return {
+            self.STAGE_QUEUED: "Waiting to start",
+            self.STAGE_READING_SOURCES: "Reading your materials",
+            self.STAGE_PREPARING_CONTENT: "Preparing the course structure",
+            self.STAGE_GENERATING_COURSE: "Generating lessons and assessments",
+            self.STAGE_VALIDATING_COURSE: "Checking the generated content",
+            self.STAGE_SAVING_COURSE: "Saving your course",
+            self.STAGE_COMPLETE: "Your course is ready",
+            self.STAGE_FAILED: "StudyQuest could not finish this course",
+        }.get(self.stage, "Preparing your course")

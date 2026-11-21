@@ -1,0 +1,833 @@
+{% extends 'courses/base.html' %}
+{% load static %}
+
+{% block title %}{{ chapter.title }} | Review{% endblock %}
+
+{% block content %}
+<style>
+    /* 1. VIEWPORT & WORKSPACE LOCK */
+    @media (min-width: 1051px) {
+        html, body { width: 100%; height: 100%; overflow: hidden !important; margin: 0; }
+        .page { height: calc(100vh - var(--topbar-height)); overflow: hidden !important; }
+    }
+    .footer, footer, .site-footer { display: none !important; }
+    .page { width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; }
+
+    /* 2. MASTER WORKSPACE */
+    .review-workspace {
+        width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+        gap: 0; padding: 24px 32px; box-sizing: border-box; overflow: hidden; background: var(--bg);
+        transition: gap 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .review-workspace.reader-open { gap: 28px; }
+
+    /* 3. HUB WORKSPACE (LEFT PANE) */
+    .lesson-hub-pane {
+        width: min(840px, 100%); height: 100%; min-width: 0; display: flex; align-items: center;
+        justify-content: center; flex: 0 0 auto; overflow: hidden;
+        transition: width 0.42s cubic-bezier(0.16, 1, 0.3, 1), padding 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .reader-open .lesson-hub-pane {
+        width: calc((100% - 28px) / 2);
+        padding-inline: clamp(12px, 1.8vw, 24px);
+        box-sizing: border-box;
+    }
+
+    .lesson-hub { 
+        width: 100%; 
+        max-width: 720px; 
+        min-width: 0; 
+        display: flex; 
+        flex-direction: column; 
+        gap: 20px; 
+        margin: 0 auto; 
+    }
+
+    .lesson-back-link { display: inline-flex; align-items: center; gap: 7px; width: fit-content; color: var(--muted); font-size: 0.9rem; font-weight: 700; text-decoration: none; transition: color 0.18s ease; }
+    .lesson-back-link:hover { color: var(--primary); }
+
+    .lesson-progress { display: flex; flex-direction: column; gap: 8px; }
+    .lesson-progress-labels { display: flex; justify-content: space-between; align-items: center; gap: 16px; color: var(--muted); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.045em; text-transform: uppercase; }
+    .lesson-progress-track { width: 100%; height: 8px; overflow: hidden; border-radius: 999px; background: var(--border); }
+    .lesson-progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.45s ease; }
+
+    .lesson-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 18px; min-width: 0; }
+    .lesson-icon { width: 52px; height: 52px; display: grid; place-items: center; flex-shrink: 0; border-radius: 14px; background: rgba(108, 92, 231, 0.14); color: var(--primary); font-size: 1.5rem; }
+    .lesson-heading-copy { min-width: 0; }
+    .lesson-heading-copy small { display: block; margin-bottom: 4px; color: var(--muted); font-size: 0.74rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+    .lesson-title { margin: 0; overflow-wrap: anywhere; color: var(--ink); font-size: clamp(1.5rem, 2.2vw, 1.85rem); line-height: 1.25; }
+    
+    .lesson-completed-chip { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; padding: 6px 14px; border-radius: 999px; background: rgba(0, 194, 168, 0.12); color: var(--accent); font-size: 0.8rem; font-weight: 800; transition: opacity 0.2s ease, visibility 0s linear 0s; }
+    .reader-open .lesson-completed-chip { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.16s ease, visibility 0s linear 0.16s; }
+
+    .lesson-preview-card { min-width: 0; padding: 28px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .lesson-preview-label { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; padding: 5px 11px; border-radius: 999px; background: rgba(0, 194, 168, 0.11); color: var(--accent); font-size: 0.74rem; font-weight: 800; }
+    .lesson-preview { position: relative; max-height: 165px; margin-bottom: 20px; overflow: hidden; color: var(--ink); }
+    .lesson-preview p { margin: 0 0 10px; font-size: 1.02rem; line-height: 1.65; color: var(--muted); }
+    .lesson-preview-fade { position: absolute; inset: auto 0 0; height: 60px; pointer-events: none; background: linear-gradient(to bottom, transparent, var(--surface)); }
+
+    .lesson-actions { display: grid; gap: 11px; }
+    .lesson-actions .btn { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box; text-align: center; padding-block: 12px; font-size: 0.98rem; }
+
+    .lesson-complete-btn:disabled:not(.is-complete) {
+        opacity: 0.45;
+        cursor: not-allowed !important;
+        filter: grayscale(0.5);
+        border-color: var(--border);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--muted);
+    }
+    .lesson-complete-btn.is-complete { cursor: default; }
+
+    .lesson-activities { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .lesson-activity { min-width: 0; min-height: 86px; display: flex; align-items: center; gap: 16px; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--ink); text-decoration: none; transition: transform 0.16s ease, border-color 0.16s ease; }
+    .lesson-activity:not(.disabled):hover { transform: translateY(-2px); border-color: var(--primary); }
+    .lesson-activity.disabled { cursor: not-allowed; opacity: 0.48; pointer-events: none; }
+    .activity-icon { width: 48px; height: 48px; display: grid; place-items: center; flex-shrink: 0; border-radius: 13px; background: rgba(0, 194, 168, 0.12); font-size: 1.35rem; }
+    .quiz-activity .activity-icon { background: rgba(108, 92, 231, 0.14); }
+    .activity-copy { min-width: 0; flex: 1; }
+    .activity-copy strong { display: block; margin-bottom: 3px; font-size: 1rem; line-height: 1.2; }
+    .activity-copy span { display: block; overflow: hidden; color: var(--muted); font-size: 0.8rem; text-overflow: ellipsis; white-space: nowrap; }
+    .activity-arrow { flex-shrink: 0; color: var(--muted); font-size: 1.15rem; }
+
+    .activity-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .activity-btn {
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.1s ease, background-color 0.15s ease;
+        line-height: 1.2;
+    }
+    .activity-btn.primary { background: var(--primary); color: #ffffff; }
+    .activity-btn.primary:hover { background: var(--primary-dark); transform: translateY(-1px); }
+    .activity-btn.secondary { background: var(--bg); color: var(--ink); border: 1px solid var(--border); }
+    .activity-btn.secondary:hover { border-color: var(--primary); color: var(--primary); transform: translateY(-1px); }
+
+    @media (max-width: 480px) {
+        .lesson-activity.has-attempt { flex-wrap: wrap; gap: 12px; }
+        .lesson-activity.has-attempt .activity-actions { width: 100%; justify-content: flex-end; }
+    }
+
+    /* 4. CHAPTER REVIEW READER (RIGHT PANE) */
+    .lesson-reader-pane {
+        width: 0; height: 100%; min-width: 0; flex: 0 0 auto; display: flex; flex-direction: column;
+        overflow: hidden; border: 0 solid var(--border); border-radius: 18px; background: var(--surface);
+        opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(16px);
+        transition: width 0.42s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.24s ease, transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), border-width 0s linear 0.12s, visibility 0s linear 0.42s;
+    }
+    body.chapter-reader-open { overflow: hidden !important; overscroll-behavior: none; }
+    .reader-open .lesson-reader-pane {
+        width: calc((100% - 28px) / 2); border-width: 1px; opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(0);
+        transition: width 0.42s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease 0.08s, transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), border-width 0s, visibility 0s;
+    }
+
+    .reader-header { flex-shrink: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 24px 28px 18px; border-bottom: 1px solid var(--border); }
+    .reader-heading { min-width: 0; }
+    .reader-heading small { display: block; margin-bottom: 4px; color: var(--accent); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+    .reader-heading h2 { margin: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 1.35rem; line-height: 1.3; }
+    .reader-close { width: 38px; height: 38px; display: grid; place-items: center; flex-shrink: 0; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--muted); font-size: 1.2rem; cursor: pointer; transition: color 0.16s ease, border-color 0.16s ease, background-color 0.16s ease; }
+    .reader-close:hover { border-color: var(--danger); background: rgba(239, 68, 68, 0.08); color: var(--danger); }
+
+    /* SPRINT G3: STICKY CHIP NAVIGATION BAR */
+    .reader-section-nav {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 24px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        overflow-x: auto;
+        white-space: nowrap;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        z-index: 10;
+    }
+    .reader-section-nav::-webkit-scrollbar { display: none; }
+
+    .reader-nav-chip {
+        flex-shrink: 0;
+        min-height: 40px;
+        padding: 8px 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--muted);
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        transition: all 0.18s ease;
+        line-height: 1.2;
+        box-sizing: border-box;
+    }
+    .reader-nav-chip:hover {
+        border-color: var(--primary);
+        color: var(--ink);
+    }
+    .reader-nav-chip.active {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #ffffff;
+        box-shadow: 0 2px 8px rgba(108, 92, 231, 0.35);
+    }
+
+    .reader-content { min-height: 0; flex: 1; overflow-y: auto; padding: 34px clamp(24px, 3.5vw, 56px) 44px; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .reader-content-inner { width: 100%; max-width: 760px; margin: 0 auto; color: var(--ink); font-size: 1.06rem; line-height: 1.8; }
+    .reader-content-inner p, .reader-content-inner ul, .reader-content-inner ol { margin: 0 0 1.25em; }
+    .reader-content-inner ul, .reader-content-inner ol { padding-left: 24px; }
+    .reader-content::-webkit-scrollbar { width: 7px; }
+    .reader-content::-webkit-scrollbar-track { background: transparent; }
+    .reader-content::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border); }
+    .reader-content::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+
+    /* 5. CRAM WIDGET STYLES */
+    .cram-overview-card { background: rgba(108, 92, 231, 0.08); border: 1px solid rgba(108, 92, 231, 0.25); border-radius: 14px; padding: 18px 20px; margin-bottom: 24px; scroll-margin-top: 16px; }
+    .cram-badge { display: inline-block; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--primary); margin-bottom: 6px; }
+    .cram-lead { font-size: 1.05rem; font-weight: 600; line-height: 1.6; margin: 0; color: var(--ink); }
+
+    .cram-section { margin-bottom: 32px; scroll-margin-top: 16px; }
+    .cram-section-group { margin-bottom: 32px; scroll-margin-top: 16px; }
+    .cram-section-title { font-size: 1.15rem; font-weight: 800; margin: 0 0 14px; color: var(--ink); }
+
+    .cram-facts-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+    .cram-facts-list li { position: relative; padding-left: 24px; font-size: 0.94rem; line-height: 1.6; color: var(--ink); }
+    .cram-facts-list li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); font-weight: 800; }
+
+    .section-block { padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+    .section-heading { font-size: 1.22rem; font-weight: 800; color: var(--ink); margin: 0 0 8px; }
+    .section-intro { font-size: 0.95rem; color: var(--muted); line-height: 1.55; margin: 0 0 16px; }
+
+    .concept-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
+    .concept-term { font-size: 1.05rem; font-weight: 800; color: var(--accent); }
+    .concept-formal { margin: 6px 0 8px; font-size: 0.92rem; line-height: 1.5; color: var(--ink); }
+    .concept-simple { background: rgba(108, 92, 231, 0.07); border-left: 3px solid var(--primary); padding: 8px 12px; border-radius: 6px; font-size: 0.88rem; line-height: 1.45; margin-bottom: 8px; }
+    .concept-analogy { font-size: 0.86rem; color: var(--muted); }
+
+    .comparison-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
+    .cram-comparison-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.88rem; }
+    .cram-comparison-table th, .cram-comparison-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+    .cram-comparison-table th { background: rgba(255, 255, 255, 0.03); font-weight: 800; text-transform: uppercase; font-size: 0.75rem; }
+
+    .enum-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 12px; }
+    .enum-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .enum-cue { font-size: 0.75rem; font-weight: 800; background: rgba(0, 194, 168, 0.12); color: var(--accent); padding: 2px 8px; border-radius: 6px; }
+    .enum-prompt { font-size: 0.88rem; color: var(--muted); margin: 0 0 10px; }
+    .enum-items { margin: 0; padding-left: 20px; font-size: 0.92rem; line-height: 1.55; }
+
+    .confusions-grid { display: flex; flex-direction: column; gap: 12px; }
+    .confusion-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+    .confusion-vs { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .badge-vs { font-weight: 700; font-size: 0.88rem; color: var(--primary); }
+    .vs-divider { font-size: 0.74rem; text-transform: uppercase; color: var(--muted); font-weight: 800; }
+    .confusion-diff { margin: 0; font-size: 0.88rem; color: var(--muted); line-height: 1.5; }
+
+    @media (max-width: 1050px) {
+        .review-workspace { padding: 20px 16px; }
+        .review-workspace.reader-open .lesson-hub-pane { display: none !important; }
+        .review-workspace.reader-open .lesson-reader-pane {
+            position: fixed;
+            inset: 0;
+            width: 100% !important;
+            height: 100dvh !important;
+            max-width: none;
+            border: none;
+            border-radius: 0;
+            z-index: 1300;
+            transform: none;
+        }
+        .reader-header { padding: 16px 20px; }
+        .reader-section-nav { padding: 8px 16px; }
+        .reader-close { width: 44px; height: 44px; font-size: 1.35rem; }
+        .reader-content { padding: 24px 20px 48px; }
+    }
+
+    @media (max-width: 640px) {
+        .review-workspace { padding: 14px 12px 24px; align-items: flex-start; overflow-y: auto; }
+        .lesson-hub-pane { height: auto; overflow: visible; }
+        .lesson-hub { gap: 16px; }
+        .lesson-heading { grid-template-columns: auto minmax(0, 1fr); gap: 12px; }
+        .lesson-completed-chip { grid-column: 1 / -1; justify-self: flex-start; }
+        .lesson-preview-card { padding: 18px 16px; }
+        .lesson-actions .btn { min-height: 48px; }
+        .lesson-activities { grid-template-columns: 1fr; gap: 10px; }
+        .lesson-activity { min-height: 64px; padding: 12px 14px; }
+        .comparison-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-inline: contain; margin-bottom: 12px; }
+        .cram-comparison-table th, .cram-comparison-table td { white-space: nowrap; padding: 10px 12px; }
+
+        html, body {
+            height: auto !important;
+            min-height: 100%;
+            overflow-x: hidden !important;
+            overflow-y: auto !important;
+        }
+
+        body.chapter-reader-open {
+            height: 100% !important;
+            overflow: hidden !important;
+        }
+
+        .page {
+            width: 100% !important;
+            height: auto !important;
+            min-height: calc(100dvh - var(--topbar-height));
+            overflow: visible !important;
+        }
+
+        .review-workspace {
+            width: 100%;
+            display: block;
+            height: auto !important;
+            min-height: calc(100dvh - var(--topbar-height));
+            padding: 14px 12px 96px !important;
+            align-items: flex-start;
+            overflow: visible !important;
+        }
+
+        .lesson-hub-pane {
+            width: 100% !important;
+            height: auto !important;
+            align-items: flex-start;
+            overflow: visible !important;
+        }
+
+        .lesson-hub { width: 100%; max-width: none; }
+        .reader-section-nav { padding: 8px 14px; }
+        .reader-nav-chip { min-height: 44px; }
+        .theme-toggle-fab { right: 16px; bottom: calc(78px + env(safe-area-inset-bottom)); }
+    }
+
+    @media (max-width: 1050px) {
+        html, body {
+            height: auto !important;
+            min-height: 100% !important;
+            overflow-x: clip !important;
+            overflow-y: auto !important;
+        }
+        body.chapter-reader-open {
+            height: 100dvh !important;
+            overflow: hidden !important;
+            overscroll-behavior: none;
+        }
+        .page {
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+        }
+        .review-workspace {
+            width: 100%;
+            height: auto !important;
+            min-height: 0 !important;
+            padding: 16px 14px 40px !important;
+            align-items: flex-start;
+            overflow: visible !important;
+        }
+        .lesson-hub-pane {
+            width: 100% !important;
+            display: block;
+            height: auto !important;
+            min-height: 0 !important;
+            flex: none !important;
+            overflow: visible !important;
+        }
+        .lesson-hub { width: 100%; max-width: none; }
+        .lesson-reader-pane { display: none; }
+        .review-workspace.reader-open .lesson-reader-pane { display: flex; }
+        .theme-toggle-fab { right: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); }
+    }
+</style>
+
+<div class="review-workspace" id="review-workspace">
+    <!-- PANE 1: CENTERED HUB -->
+    <section class="lesson-hub-pane">
+        <div class="lesson-hub">
+            <a href="{% url 'courses:course_detail' chapter.course.pk %}" class="lesson-back-link">
+                <span aria-hidden="true">&larr;</span>
+                <span>Back to {{ chapter.course.title }}</span>
+            </a>
+
+            <div class="lesson-progress">
+                <div class="lesson-progress-labels">
+                    <span>Lesson {{ chapter.order }} of {{ total_chapters }}</span>
+                    <span>Course Progress: {{ course_progress_pct }}%</span>
+                </div>
+                <div class="lesson-progress-track" role="progressbar" aria-label="Course progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ course_progress_pct }}">
+                    <div class="lesson-progress-fill" data-progress="{{ course_progress_pct }}"></div>
+                </div>
+            </div>
+
+            {% if focus_topics %}
+                <div class="card focus-chapter-banner" style="
+                    background: linear-gradient(135deg, rgba(232, 163, 61, 0.12) 0%, rgba(117, 108, 243, 0.08) 100%), var(--surface);
+                    border: 1px solid rgba(232, 163, 61, 0.35);
+                    border-radius: 12px;
+                    padding: 12px 16px;
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                ">
+                    <span style="font-size: 1.25rem;">🎯</span>
+                    <div style="font-size: 0.84rem; color: var(--ink); line-height: 1.45;">
+                        <strong>Focus Target:</strong> This unit directly strengthens your focus in 
+                        {% for t in focus_topics %}<strong>{{ t }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}.
+                        Master this review and score &ge;80% on the quiz to reach subject mastery!
+                    </div>
+                </div>
+            {% endif %}
+
+            <header class="lesson-heading">
+                <div class="lesson-icon" aria-hidden="true">📖</div>
+                <div class="lesson-heading-copy">
+                    <small>Lesson</small>
+                    <h1 class="lesson-title">{{ chapter.title }}</h1>
+                </div>
+                {% if is_completed %}
+                    <span class="lesson-completed-chip" id="lesson-completed-chip">✓ Completed</span>
+                {% endif %}
+            </header>
+
+            <article class="lesson-preview-card">
+                <span class="lesson-preview-label">Quick Review</span>
+                <div class="lesson-preview">
+                    <p>{{ chapter_overview }}</p>
+                    <div class="lesson-preview-fade" aria-hidden="true"></div>
+                </div>
+                <div class="lesson-actions">
+                    <button type="button" id="read-full-lesson-btn" class="btn btn-secondary" aria-controls="lesson-reader-pane" aria-expanded="false">
+                        <span>Chapter Review</span>
+                        <span aria-hidden="true">&nearr;</span>
+                    </button>
+                    <!-- Data attributes cleanly store server variables to prevent JS parser errors -->
+                    <button
+                        type="button"
+                        id="mark-complete-btn"
+                        class="btn btn-primary btn-chunky lesson-complete-btn {% if is_completed %}is-complete{% endif %}"
+                        data-chapter-id="{{ chapter.pk }}"
+                        data-has-read="{{ has_read_to_end|yesno:'true,false' }}"
+                        data-reading-url="{% url 'courses:record_chapter_reading' chapter.pk %}"
+                        data-complete-url="{% url 'courses:complete_chapter' chapter.pk %}"
+                        {% if not is_completed and not has_read_to_end %}disabled{% endif %}
+                    >
+                        {% if is_completed %}
+                            Completed ✓
+                        {% elif has_read_to_end %}
+                            Mark Lesson Complete (+15 XP)
+                        {% else %}
+                            Review Lesson to Unlock (+15 XP)
+                        {% endif %}
+                    </button>
+                </div>
+            </article>
+
+            <section class="lesson-activities" aria-label="Lesson activities">
+                <div class="lesson-activity disabled" title="Coming soon" aria-disabled="true">
+                    <div class="activity-icon" aria-hidden="true">🃏</div>
+                    <div class="activity-copy">
+                        <strong>Flashcards</strong>
+                        <span>Coming soon</span>
+                    </div>
+                </div>
+
+                {% if has_quiz %}
+                    {% if latest_attempt %}
+                        <!-- Displays when the learner has previously completed an attempt -->
+                        <div class="lesson-activity quiz-activity has-attempt">
+                            <div class="activity-icon" aria-hidden="true">⚡</div>
+                            <div class="activity-copy">
+                                <strong>Quiz</strong>
+                                <span>Score: {{ latest_attempt.score|floatformat:0 }}/{{ latest_attempt.total_questions }}{% if not is_completed %} · Score &ge; {{ prior_knowledge_threshold|default:90 }}% to bypass{% endif %}</span>
+                            </div>
+                            <div class="activity-actions">
+                                <a href="{% url 'courses:chapter_quiz' chapter.pk %}"
+                                   class="activity-btn primary prequiz-trigger"
+                                   data-chapter-id="{{ chapter.pk }}"
+                                   data-lesson-completed="{{ is_completed|yesno:'true,false' }}"
+                                   data-quiz-url="{% url 'courses:chapter_quiz' chapter.pk %}"
+                                   title="Retake Quiz">Retake</a>
+                                {% if latest_attempt.review_data.review_items %}
+                                    <a href="{% url 'courses:chapter_quiz' chapter.pk %}?view=review" class="activity-btn secondary" title="Review Last Results">Review</a>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% else %}
+                        <!-- Displays for first-time quiz takers -->
+                        <a href="{% url 'courses:chapter_quiz' chapter.pk %}"
+                           class="lesson-activity quiz-activity prequiz-trigger"
+                           data-chapter-id="{{ chapter.pk }}"
+                           data-lesson-completed="{{ is_completed|yesno:'true,false' }}"
+                           data-quiz-url="{% url 'courses:chapter_quiz' chapter.pk %}">
+                            <div class="activity-icon" aria-hidden="true">⚡</div>
+                            <div class="activity-copy">
+                                <strong>{% if not is_completed %}Try Quiz First{% else %}Quiz{% endif %}</strong>
+                                <span>{{ question_count }} question{{ question_count|pluralize }}{% if not is_completed %} · Score &ge; {{ prior_knowledge_threshold|default:90 }}% to bypass{% endif %}</span>
+                            </div>
+                            <span class="activity-arrow" aria-hidden="true">&rarr;</span>
+                        </a>
+                    {% endif %}
+                {% else %}
+                    <div class="lesson-activity quiz-activity disabled" title="No quiz generated yet" aria-disabled="true">
+                        <div class="activity-icon" aria-hidden="true">⚡</div>
+                        <div class="activity-copy">
+                            <strong>Quiz</strong>
+                            <span>Not available yet</span>
+                        </div>
+                    </div>
+                {% endif %}
+            </section>
+        </div>
+    </section>
+
+    <!-- PANE 2: CHAPTER REVIEW READER -->
+    <aside class="lesson-reader-pane" id="lesson-reader-pane" aria-hidden="true" aria-label="Chapter review reader">
+        <header class="reader-header">
+            <div class="reader-heading">
+                <small>Chapter Review</small>
+                <h2>{{ chapter.title }}</h2>
+            </div>
+            <button type="button" class="reader-close" id="close-reader-btn" aria-label="Close chapter review" title="Close chapter review">✕</button>
+        </header>
+
+        <!-- SPRINT G3: STICKY CHIP NAVIGATION BAR -->
+        <nav class="reader-section-nav" id="reader-section-nav" aria-label="Section navigation" hidden></nav>
+
+        <div class="reader-content" id="reader-content" tabindex="0">
+            <!-- Broad Fallback Destination for General Hash Links -->
+            <article id="chapter-review-content" class="reader-content-inner">
+                
+                <!-- 1. OVERVIEW -->
+                <div class="cram-overview-card" id="overview" data-review-section data-section-label="Overview">
+                    <span class="cram-badge">{{ chapter_data.week_label|default:"Chapter Focus" }}</span>
+                    <p class="cram-lead">{{ chapter_overview }}</p>
+                </div>
+
+                <!-- 2. LEARNING OBJECTIVES (Independent) -->
+                {% if chapter_data.learning_objectives %}
+                    <div class="cram-section" id="learning-objectives" data-review-section data-section-label="Objectives">
+                        <h3 class="cram-section-title">🎯 Learning Objectives</h3>
+                        <ul class="cram-facts-list">
+                            {% for obj in chapter_data.learning_objectives %}
+                                <li>{{ obj }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                {% endif %}
+
+                <!-- 3. CONCEPTS / SECTIONS (Independent) -->
+                {% if chapter_data.sections %}
+                    <div class="cram-section-group" id="concepts" data-review-section data-section-label="Concepts">
+                        {% for section in chapter_data.sections %}
+                            <div class="cram-section section-block">
+                                <h3 class="section-heading">{{ forloop.counter }}. {{ section.title }}</h3>
+                                {% if section.introduction %}
+                                    <p class="section-intro">{{ section.introduction }}</p>
+                                {% endif %}
+
+                                {% for concept in section.concepts %}
+                                    <div class="concept-card">
+                                        <div class="concept-header">
+                                            <span class="concept-term">{{ concept.term }}</span>
+                                        </div>
+                                        <p class="concept-formal"><strong>Definition:</strong> {{ concept.formal_definition }}</p>
+                                        <div class="concept-simple">
+                                            <strong>In Simple Words:</strong> {{ concept.simple_explanation }}
+                                        </div>
+                                        {% if concept.analogy %}
+                                            <div class="concept-analogy">
+                                                💡 <strong>Analogy:</strong> {{ concept.analogy }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                {% endfor %}
+
+                                {% if section.key_points %}
+                                    <ul class="cram-facts-list" style="margin-top: 14px;">
+                                        {% for pt in section.key_points %}
+                                            <li>{{ pt }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% elif chapter_data.key_terms %}
+                    <div class="cram-section" id="concepts" data-review-section data-section-label="Key Terms">
+                        <h3 class="cram-section-title">Key Terms</h3>
+                        {% for term in chapter_data.key_terms %}
+                            <div class="concept-card">
+                                <div class="concept-term">{{ term.term }}</div>
+                                <p class="concept-formal">{{ term.definition }}</p>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                <!-- 4. COMPARISON MATRICES (Independent) -->
+                {% if chapter_data.comparisons %}
+                    <div class="cram-section" id="comparisons" data-review-section data-section-label="Comparisons">
+                        {% for comp in chapter_data.comparisons %}
+                            <h3 class="cram-section-title">⚖️ {{ comp.title }}</h3>
+                            <div class="comparison-table-wrap">
+                                <table class="cram-comparison-table">
+                                    <thead>
+                                        <tr>
+                                            {% for col in comp.columns %}
+                                                <th>{{ col }}</th>
+                                            {% endfor %}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for row in comp.rows %}
+                                            <tr>
+                                                <td><strong>{{ row.criterion }}</strong></td>
+                                                {% for val in row.values %}
+                                                    <td>{{ val }}</td>
+                                                {% endfor %}
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                <!-- 5. HIGH-YIELD ENUMERATIONS (Independent) -->
+                {% if chapter_data.enumerations %}
+                    <div class="cram-section" id="enumerations" data-review-section data-section-label="Enumerations">
+                        <h3 class="cram-section-title">📋 Key Enumerations</h3>
+                        <div class="enum-grid">
+                            {% for enum in chapter_data.enumerations %}
+                                <div class="enum-card">
+                                    <div class="enum-header">
+                                        <strong>{{ enum.title }}</strong>
+                                        {% if enum.memory_cue %}<span class="enum-cue">{{ enum.memory_cue }}</span>{% endif %}
+                                    </div>
+                                    <p class="enum-prompt">{{ enum.prompt }}</p>
+                                    <ol class="enum-items">
+                                        {% for it in enum.items %}
+                                            <li>{{ it }}</li>
+                                        {% endfor %}
+                                    </ol>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- 6. COMMON CONFUSIONS (Independent) -->
+                {% if chapter_data.common_confusions %}
+                    <div class="cram-section" id="common-confusions" data-review-section data-section-label="Common Confusions">
+                        <h3 class="cram-section-title">⚠️ Common Confusions</h3>
+                        <div class="confusions-grid">
+                            {% for trap in chapter_data.common_confusions %}
+                                <div class="confusion-card">
+                                    <div class="confusion-vs">
+                                        <span class="badge-vs">{{ trap.concept_a }}</span>
+                                        <span class="vs-divider">vs</span>
+                                        <span class="badge-vs">{{ trap.concept_b }}</span>
+                                    </div>
+                                    <p class="confusion-diff">{{ trap.difference }}</p>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- 7. KEY TAKEAWAYS (Independent) -->
+                {% if chapter_data.key_takeaways %}
+                    <div class="cram-section" id="takeaways" data-review-section data-section-label="Takeaways">
+                        <h3 class="cram-section-title">📌 Key Takeaways</h3>
+                        <ul class="cram-facts-list">
+                            {% for take in chapter_data.key_takeaways %}
+                                <li>{{ take }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                {% endif %}
+
+                <!-- LEGACY / EXTRA FALLBACK CONTENT -->
+                {% if chapter_data.quick_facts %}
+                    <div class="cram-section" id="quick-facts" data-review-section data-section-label="Quick Facts">
+                        <h3 class="cram-section-title">Quick Facts</h3>
+                        <ul class="cram-facts-list">
+                            {% for fact in chapter_data.quick_facts %}<li>{{ fact }}</li>{% endfor %}
+                        </ul>
+                    </div>
+                {% endif %}
+
+                {% if chapter_data.timeline %}
+                    <div class="cram-section" id="timeline" data-review-section data-section-label="Timeline">
+                        <h3 class="cram-section-title">Timeline</h3>
+                        <ul class="cram-facts-list">
+                            {% for item in chapter_data.timeline %}<li>{{ item }}</li>{% endfor %}
+                        </ul>
+                    </div>
+                {% endif %}
+
+                {% if chapter_data.real_world_examples %}
+                    <div class="cram-section" id="examples" data-review-section data-section-label="Examples">
+                        <h3 class="cram-section-title">Real-World Examples</h3>
+                        <ul class="cram-facts-list">
+                            {% for example in chapter_data.real_world_examples %}<li>{{ example }}</li>{% endfor %}
+                        </ul>
+                    </div>
+                {% endif %}
+
+                {% if chapter_data.analogy %}
+                    <div class="cram-section" id="analogy" data-review-section data-section-label="Analogy">
+                        <h3 class="cram-section-title">Analogy</h3>
+                        <p class="section-intro">{{ chapter_data.analogy.explanation|default:chapter_data.analogy }}</p>
+                    </div>
+                {% endif %}
+
+                {% if not chapter_data.sections and not chapter_data.key_terms and not chapter_data.quick_facts and not chapter_data.timeline and not chapter_data.real_world_examples and not chapter_data.analogy and not chapter_data.enumerations and not chapter_data.common_confusions and not chapter_data.comparisons %}
+                    <p>{{ chapter_overview|linebreaks }}</p>
+                {% endif %}
+            </article>
+        </div>
+    </aside>
+</div>
+
+
+
+<!-- Reader Toggle & Reading Completion Tracking -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const workspace = document.getElementById('review-workspace');
+    const reader = document.getElementById('lesson-reader-pane');
+    const readerContent = document.getElementById('reader-content');
+    const openReaderBtn = document.getElementById('read-full-lesson-btn');
+    const closeReaderBtn = document.getElementById('close-reader-btn');
+    const completeBtn = document.getElementById('mark-complete-btn');
+
+
+
+    let hasReadToEnd = (completeBtn && completeBtn.dataset.hasRead === 'true') ||
+                       (completeBtn && completeBtn.classList.contains('is-complete'));
+
+    document.querySelectorAll('[data-progress]').forEach(el => {
+        el.style.width = el.getAttribute('data-progress') + '%';
+    });
+
+    function getCookie(name) {
+        const parts = (`; ${document.cookie}`).split(`; ${name}=`);
+        return parts.length === 2 ? parts.pop().split(';').shift() : '';
+    }
+
+    async function recordReadingCompletion() {
+        if (!completeBtn || !completeBtn.dataset.readingUrl) return;
+        const response = await fetch(completeBtn.dataset.readingUrl, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+        if (response.ok) {
+            hasReadToEnd = true;
+            completeBtn.disabled = false;
+            completeBtn.textContent = 'Mark Lesson Complete (+15 XP)';
+        }
+    }
+
+    function checkReadingProgress() {
+        if (hasReadToEnd || !readerContent) return;
+        const scrollBottom = readerContent.scrollTop + readerContent.clientHeight;
+        const scrollThreshold = readerContent.scrollHeight - 160;
+        if (scrollBottom >= scrollThreshold) {
+            recordReadingCompletion();
+        }
+    }
+
+    if (readerContent) {
+        readerContent.addEventListener('scroll', checkReadingProgress, { passive: true });
+    }
+
+    function openReader() {
+        workspace.classList.add('reader-open');
+        reader.setAttribute('aria-hidden', 'false');
+        openReaderBtn.setAttribute('aria-expanded', 'true');
+        document.body.classList.add('chapter-reader-open');
+        window.requestAnimationFrame(() => {
+            closeReaderBtn.focus();
+            checkReadingProgress();
+        });
+    }
+
+    function closeReader() {
+        workspace.classList.remove('reader-open');
+        reader.setAttribute('aria-hidden', 'true');
+        openReaderBtn.setAttribute('aria-expanded', 'false');
+        document.body.classList.remove('chapter-reader-open');
+        openReaderBtn.focus();
+    }
+
+    if (openReaderBtn && closeReaderBtn) {
+        openReaderBtn.addEventListener('click', openReader);
+        closeReaderBtn.addEventListener('click', closeReader);
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (prequizModal && prequizModal.classList.contains('open')) {
+                setModalOpen(prequizModal, false);
+            } else if (workspace.classList.contains('reader-open')) {
+                closeReader();
+            }
+        }
+    });
+
+    if (!completeBtn) return;
+
+    completeBtn.addEventListener('click', async () => {
+        if (completeBtn.disabled || completeBtn.classList.contains('is-complete')) return;
+
+        const originalText = completeBtn.textContent.trim();
+        completeBtn.disabled = true;
+        completeBtn.textContent = 'Saving...';
+
+        try {
+            const completeUrl = completeBtn.dataset.completeUrl || `/chapters/${completeBtn.dataset.chapterId}/complete/`;
+            const response = await fetch(completeUrl, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+
+            if (!response.ok) throw new Error(`Server error: ${response.status}`);
+            await response.json();
+
+            completeBtn.textContent = 'Completed ✓';
+            completeBtn.classList.add('is-complete');
+
+            if (!document.getElementById('lesson-completed-chip')) {
+                const completedChip = document.createElement('span');
+                completedChip.id = 'lesson-completed-chip';
+                completedChip.className = 'lesson-completed-chip';
+                completedChip.textContent = '✓ Completed';
+                const heading = document.querySelector('.lesson-heading');
+                if (heading) heading.appendChild(completedChip);
+            }
+        } catch (error) {
+            completeBtn.disabled = false;
+            completeBtn.textContent = originalText;
+            console.error('Unable to mark lesson complete:', error);
+        }
+    });
+});
+</script>
+
+<!-- Sprint G3: Sticky Navigation & URL Hash Deep-Linking -->
+<script src="{% static 'courses/js/chapter_review.js' %}?v=1"></script>
+{% endblock %}

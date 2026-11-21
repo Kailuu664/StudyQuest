@@ -1,0 +1,386 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}StudyQuest{% endblock %}</title>
+
+    <script>
+        const savedTheme = localStorage.getItem('studyquest_theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+    </script>
+
+    <link rel="stylesheet" href="{% static 'courses/css/style.css' %}">
+    <style>
+        .topbar-plan { position:relative; }
+        .topbar-plan-chip { min-height:32px; padding:0 12px; display:inline-flex; align-items:center; gap:7px; border:1px solid rgba(0,194,168,.28); border-radius:999px; background:linear-gradient(135deg,rgba(0,194,168,.12),rgba(108,92,231,.08)); color:var(--accent); font:inherit; font-size:.72rem; font-weight:900; letter-spacing:.05em; text-transform:uppercase; cursor:pointer; }
+        .topbar-plan-chip.is-plus { border-color:rgba(255,184,0,.32); background:linear-gradient(135deg,rgba(255,184,0,.14),rgba(108,92,231,.12)); color:var(--gold); }
+        .plan-dot { width:7px; height:7px; border-radius:999px; background:currentColor; box-shadow:0 0 8px currentColor; }
+        .topbar-plan-menu { position:absolute; top:calc(100% + 12px); right:0; z-index:1200; width:min(340px,calc(100vw - 28px)); padding:16px; border:1px solid var(--border); border-radius:16px; background:var(--surface); box-shadow:0 18px 48px rgba(0,0,0,.45); }
+        .topbar-plan-menu[hidden] { display:none; }
+        .plan-menu-heading { display:flex; justify-content:space-between; gap:12px; margin-bottom:14px; }
+        .plan-menu-heading span { color:var(--ink); font-size:.95rem; font-weight:900; }
+        .plan-menu-heading strong { color:var(--accent); font-size:.68rem; text-transform:uppercase; }
+        .plan-menu-copy { margin:0 0 12px; color:var(--muted); font-size:.76rem; line-height:1.5; }
+        .topbar-profile-link { display:inline-flex; align-items:center; gap:7px; padding:3px 10px 3px 4px; border-radius:999px; background:rgba(108,92,231,.1); border:1px solid rgba(108,92,231,.25); color:var(--ink); text-decoration:none; font-size:.78rem; font-weight:700; transition:all .2s ease; }
+        .topbar-profile-link:hover { background:rgba(108,92,231,.18); border-color:var(--primary); }
+        .profile-chip-avatar { width:22px; height:22px; border-radius:50%; background:var(--primary); color:#ffffff; display:flex; align-items:center; justify-content:center; font-size:.68rem; font-weight:900; }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+    <header class="topbar">
+        <div class="topbar-left">
+            {% if user.is_authenticated %}
+                <button type="button" class="mobile-menu-button" id="mobile-nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="mobile-nav-drawer">
+                    <span aria-hidden="true">☰</span>
+                </button>
+            {% endif %}
+            <a class="brand" href="{% url 'courses:dashboard' %}" data-brand-link data-sandbox-url="{% url 'courses:forge_sandbox' %}">🎮 StudyQuest</a>
+            <div id="sandbox-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+            <div id="sandbox-toast" class="sandbox-toast" hidden role="status" aria-live="polite">Developer camp unlocked.</div>
+        </div>
+
+        {% if user.is_authenticated %}
+            <nav class="topbar-desktop-nav" aria-label="Main navigation">
+                <a href="{% url 'courses:dashboard' %}" class="topbar-link">Dashboard</a>
+                <a href="{% url 'courses:course_list' %}" class="topbar-link">Course Library</a>
+                <a href="{% url 'courses:course_create' %}" class="topbar-link">Create Course</a>
+                <a href="{% url 'courses:leaderboard' %}" class="topbar-link">Rank &amp; Tiers</a>
+                <a href="{% url 'dungeon:launch' %}" class="topbar-link topbar-dungeon-link" {% block nav_dungeon_aria %}{% endblock %}><span aria-hidden="true">🔑</span> Dungeon Quest</a>
+                {% if user.is_staff %}
+                    <a href="{% url 'courses:forge_sandbox' %}" class="topbar-link dev-sandbox-link" title="StudyQuest Camp Developer Sandbox" style="opacity:0.75; font-size:0.78rem;">⛺ Sandbox</a>
+                {% endif %}
+            </nav>
+
+            <div class="stats topbar-desktop-stats">
+                <a href="{% url 'courses:profile' %}" class="topbar-profile-link" title="View Profile">
+                    <span class="profile-chip-avatar">{{ user.username|first|upper }}</span>
+                    <span class="profile-chip-name">{{ user.username }}</span>
+                </a>
+                <div class="topbar-plan">
+                    <button type="button" class="topbar-plan-chip {% if user.userprofile.plan == 'plus' %}is-plus{% endif %}" id="topbar-plan-btn" aria-expanded="false" aria-controls="topbar-plan-menu"><span class="plan-dot"></span>{% if user.userprofile.plan == 'plus' %}Plus{% else %}Free{% endif %}<span aria-hidden="true">▾</span></button>
+                    <div class="topbar-plan-menu" id="topbar-plan-menu" hidden>
+                        <div class="plan-menu-heading"><span>StudyQuest {% if user.userprofile.plan == 'plus' %}Plus{% else %}Free{% endif %}</span><strong>Current Plan</strong></div>
+                        <p class="plan-menu-copy">Core learning tools, mixed assessments, and chapter progression are available to every learner.</p>
+                        <button type="button" class="btn btn-primary btn-sm" id="topbar-compare-plans">Compare Plans</button>
+                    </div>
+                </div>
+                <!-- LEVEL POPOVER -->
+                <div class="topbar-popover-anchor">
+                    <button type="button" class="stat topbar-stat-btn" data-stat="level" id="topbar-level-btn" aria-expanded="false" aria-controls="topbar-level-popover" title="View Level Details">
+                        🏅 Lv. {{ topbar_stats.level_progress.current_level|default:user.userprofile.current_level|default:1 }}
+                    </button>
+                    <div class="topbar-menu-popover level-popover" id="topbar-level-popover" hidden>
+                        <div class="popover-header">
+                            <div class="popover-title-group">
+                                <span class="popover-icon">{{ topbar_stats.tier.icon|default:"🥉" }}</span>
+                                <strong>{{ topbar_stats.tier.name|default:"Bronze" }} Tier</strong>
+                            </div>
+                            <span class="popover-badge">Level {{ topbar_stats.level_progress.current_level|default:user.userprofile.current_level|default:1 }}</span>
+                        </div>
+
+                        <div class="popover-progress-block">
+                            <div class="popover-progress-labels">
+                                <span>{{ topbar_stats.level_progress.xp_into_level|default:0 }} / 100 XP</span>
+                                <span class="popover-highlight">{{ topbar_stats.level_progress.xp_needed_for_next|default:100 }} XP to Lv. {{ topbar_stats.level_progress.next_level|default:2 }}</span>
+                            </div>
+                            <div class="popover-progress-track">
+                                <div class="popover-progress-fill" style="width: {{ topbar_stats.level_progress.progress_pct|default:0 }}%;"></div>
+                            </div>
+                        </div>
+
+                        <p class="popover-copy">
+                            Earn XP by passing chapter quizzes and reading course modules to advance your academic rank.
+                        </p>
+
+                        <a href="{% url 'courses:leaderboard' %}" class="popover-action-link">
+                            🏆 View Rank &amp; Tiers Roadmap &rarr;
+                        </a>
+                    </div>
+                </div>
+
+                <!-- XP POPOVER -->
+                <div class="topbar-popover-anchor">
+                    <button type="button" class="stat topbar-stat-btn" data-stat="xp" id="topbar-xp-btn" aria-expanded="false" aria-controls="topbar-xp-popover" title="View XP Breakdown">
+                        ⭐ {{ user.userprofile.total_xp|default:0 }} XP
+                    </button>
+                    <div class="topbar-menu-popover xp-popover" id="topbar-xp-popover" hidden>
+                        <div class="popover-header">
+                            <div class="popover-title-group">
+                                <span class="popover-icon">⭐</span>
+                                <strong>XP Breakdown</strong>
+                            </div>
+                            <span class="popover-badge xp-badge-gold">{{ user.userprofile.total_xp|default:0 }} Total XP</span>
+                        </div>
+
+                        <div class="xp-velocity-banner">
+                            <span class="velocity-label">This Week's Momentum:</span>
+                            <strong class="velocity-value">⚡ +{{ topbar_stats.weekly_xp|default:0 }} XP</strong>
+                        </div>
+
+                        <div class="recent-xp-section">
+                            <span class="recent-xp-heading">Recent Awards</span>
+                            {% if topbar_stats.recent_xp %}
+                                <ul class="recent-xp-list">
+                                    {% for tx in topbar_stats.recent_xp %}
+                                        <li class="recent-xp-item">
+                                            <span class="xp-tx-amount">+{{ tx.amount }} XP</span>
+                                            <span class="xp-tx-reason" title="{{ tx.reason }}">{{ tx.reason }}</span>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            {% else %}
+                                <p class="popover-copy-muted">Complete study chapters or pass quizzes to earn your first XP!</p>
+                            {% endif %}
+                        </div>
+
+                        <a href="{% url 'courses:profile' %}" class="popover-action-link">
+                            👤 View Full Profile &amp; Ledger &rarr;
+                        </a>
+                    </div>
+                </div>
+
+                <!-- STREAK POPOVER -->
+                <div class="topbar-popover-anchor">
+                    <button type="button" class="stat topbar-stat-btn" data-stat="streak" id="topbar-streak-btn" aria-expanded="false" aria-controls="topbar-streak-popover" title="View Streak Calendar">
+                        🔥 {{ user.userprofile.streak_days|default:0 }} day{{ user.userprofile.streak_days|default:0|pluralize }} streak
+                    </button>
+                    <div class="topbar-menu-popover streak-popover" id="topbar-streak-popover" hidden>
+                        <div class="popover-header">
+                            <div class="popover-title-group">
+                                <span class="popover-icon">🔥</span>
+                                <strong>{{ user.userprofile.streak_days|default:0 }}-Day Streak</strong>
+                            </div>
+                            <span class="popover-badge">Best: {{ topbar_stats.best_streak_days|default:user.userprofile.best_streak_days|default:0 }}d</span>
+                        </div>
+
+                        <!-- 7-Day Rolling Mon-Sun Calendar -->
+                        <div class="streak-calendar-strip" role="group" aria-label="7-Day Streak Calendar">
+                            {% for day in topbar_stats.streak_week %}
+                                <div class="streak-day {{ day.status }}{% if day.is_today %} is-today{% endif %}" title="{{ day.label }} {{ day.date|date:'M j' }}: {% if day.status == 'done' %}Completed{% elif day.status == 'today_done' %}Secured for Today!{% elif day.status == 'today_pending' %}Today (Pending Activity){% elif day.status == 'upcoming' %}Upcoming{% else %}No Activity{% endif %}">
+                                    <span class="day-letter">{{ day.label }}</span>
+                                    <div class="day-node">
+                                        {% if day.status == 'done' %}✓
+                                        {% elif day.status == 'today_done' %}🔥
+                                        {% elif day.status == 'today_pending' %}🔥
+                                        {% else %}&middot;{% endif %}
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="streak-status-footer">
+                            {% if topbar_stats.streak_status.studied_today %}
+                                <p class="popover-copy-success">
+                                    🎉 <strong>Streak secured for today!</strong> Awesome work keeping your momentum alive.
+                                </p>
+                            {% else %}
+                                <p class="popover-copy">
+                                    Complete a chapter reading or pass a quiz today to keep your streak alive.
+                                </p>
+                            {% endif %}
+                        </div>
+
+                        <a href="{% url 'courses:dashboard' %}" class="popover-action-link">
+                            ⚡ Go to Today's Learning Quest &rarr;
+                        </a>
+                    </div>
+                </div>
+                <form method="post" action="{% url 'logout' %}" style="display:inline; margin:0;">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-ghost" style="padding: 4px 10px; font-size: 0.8rem;">Log Out</button>
+                </form>
+            </div>
+        {% endif %}
+    </header>
+
+    {% if user.is_authenticated %}
+        <nav class="mobile-nav-panel" id="mobile-nav-drawer" aria-label="Mobile navigation" hidden>
+            <div class="mobile-nav-links">
+                <a href="{% url 'courses:dashboard' %}">📊 Dashboard</a>
+                <a href="{% url 'courses:course_list' %}">📚 Course Library</a>
+                <a href="{% url 'courses:course_create' %}">⚡ Create Course</a>
+                <a href="{% url 'courses:leaderboard' %}">🏆 Rank &amp; Tiers</a>
+                <a href="{% url 'dungeon:launch' %}" class="topbar-dungeon-link" {% block nav_dungeon_aria_mobile %}{% endblock %}>🗝️ Dungeon Quest</a>
+                <a href="{% url 'courses:profile' %}">👤 My Profile</a>
+                {% if user.is_staff %}
+                    <a href="{% url 'courses:forge_sandbox' %}" style="opacity: 0.75; font-size: 0.84rem;">⛺ Camp Sandbox (Dev)</a>
+                {% endif %}
+            </div>
+
+            <div class="mobile-nav-stats">
+                <a href="{% url 'courses:leaderboard' %}" class="stat" style="text-decoration: none;">🏅 Level {{ user.userprofile.current_level|default:1 }}</a>
+                <a href="{% url 'courses:profile' %}" class="stat" style="text-decoration: none;">⭐ {{ user.userprofile.total_xp|default:0 }} XP</a>
+                <a href="{% url 'courses:dashboard' %}" class="stat" style="text-decoration: none;">🔥 {{ user.userprofile.streak_days|default:0 }} Day Streak</a>
+            </div>
+
+            <form method="post" action="{% url 'logout' %}" style="margin-top: 16px;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-ghost" style="width: 100%; text-align: center; border: 1px solid var(--border);">Log Out</button>
+            </form>
+        </nav>
+    {% endif %}
+
+    <main class="page {% block page_class %}{% endblock %}">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <p>StudyQuest &copy; 2026 — AI-Powered Gamified Learning Platform</p>
+    </footer>
+
+    <button id="theme-toggle" class="theme-toggle-fab" aria-label="Toggle dark mode" title="Changes your theme outside Dungeon Quest" aria-describedby="dq-theme-note">
+        <svg id="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+        <svg id="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+    </button>
+    <span id="dq-theme-note" class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">
+        Dungeon Quest always uses its dark appearance. This control changes your appearance preference for other StudyQuest pages.
+    </span>
+
+    <script>
+        (function() {
+            const root = document.documentElement;
+            const btn = document.getElementById('theme-toggle');
+            if (!btn) return;
+
+            btn.addEventListener('click', () => {
+                const isDark = root.getAttribute('data-theme') === 'dark';
+                const nextTheme = isDark ? 'light' : 'dark';
+                root.setAttribute('data-theme', nextTheme);
+                localStorage.setItem('studyquest_theme', nextTheme);
+            });
+        })();
+    </script>
+    <script>
+        // Unified Topbar Popovers Controller
+        (() => {
+            const anchors = document.querySelectorAll('.topbar-popover-anchor, .topbar-plan');
+            if (!anchors.length) return;
+
+            function closeAllPopovers() {
+                document.querySelectorAll('.topbar-menu-popover, .topbar-plan-menu').forEach(pop => {
+                    pop.hidden = true;
+                });
+                document.querySelectorAll('.topbar-stat-btn, .topbar-plan-chip').forEach(btn => {
+                    btn.setAttribute('aria-expanded', 'false');
+                });
+            }
+
+            anchors.forEach(anchor => {
+                const btn = anchor.querySelector('.topbar-stat-btn, .topbar-plan-chip');
+                const pop = anchor.querySelector('.topbar-menu-popover, .topbar-plan-menu');
+                if (!btn || !pop) return;
+
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const willOpen = pop.hidden;
+                    closeAllPopovers();
+                    if (willOpen) {
+                        pop.hidden = false;
+                        btn.setAttribute('aria-expanded', 'true');
+                    }
+                });
+            });
+
+            // Close on outside click
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.topbar-popover-anchor') && !e.target.closest('.topbar-plan')) {
+                    closeAllPopovers();
+                }
+            });
+
+            // Close on Escape key and return focus
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    const openBtn = document.querySelector('.topbar-stat-btn[aria-expanded="true"], .topbar-plan-chip[aria-expanded="true"]');
+                    closeAllPopovers();
+                    if (openBtn) openBtn.focus();
+                }
+            });
+
+            // Compare plans modal trigger
+            document.getElementById('topbar-compare-plans')?.addEventListener('click', () => {
+                closeAllPopovers();
+                const modal = document.getElementById('plus-preview-modal');
+                if (modal) {
+                    modal.hidden = false;
+                    modal.setAttribute('aria-hidden', 'false');
+                    document.documentElement.classList.add('modal-open');
+                    document.body.classList.add('modal-open');
+                } else {
+                    window.location.href = '{% url "courses:dashboard" %}';
+                }
+            });
+        })();
+    </script>
+    <script>
+        (() => {
+            const toggle = document.getElementById('mobile-nav-toggle');
+            const drawer = document.getElementById('mobile-nav-drawer');
+            if (!toggle || !drawer) return;
+
+            const closeDrawer = () => {
+                drawer.hidden = true;
+                drawer.classList.remove('open');
+                toggle.setAttribute('aria-expanded', 'false');
+                document.body.style.overflow = '';
+            };
+
+            toggle.addEventListener('click', () => {
+                const open = drawer.hidden;
+                drawer.hidden = !open;
+                drawer.classList.toggle('open', open);
+                toggle.setAttribute('aria-expanded', String(open));
+                document.body.style.overflow = open ? 'hidden' : '';
+            });
+
+            drawer.addEventListener('click', (event) => {
+                if (event.target === drawer) closeDrawer();
+            });
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && !drawer.hidden) {
+                    closeDrawer();
+                    toggle.focus();
+                }
+            });
+
+            const syncNavigationForViewport = () => {
+                if (window.innerWidth > 1050 && !drawer.hidden) closeDrawer();
+            };
+            window.addEventListener('resize', syncNavigationForViewport);
+        })();
+
+        // Add or verify inside the main base.html script tag:
+        function toggleModalScrollLock(shouldLock) {
+            document.body.classList.toggle('modal-open', shouldLock);
+            document.documentElement.classList.toggle('modal-open', shouldLock);
+        }
+
+        // Bind to open/close triggers
+        document.querySelectorAll('[data-close-modal], .sq-modal-close, #close-plus-modal').forEach(btn => {
+            btn.addEventListener('click', () => toggleModalScrollLock(false));
+        });
+
+    </script>
+    {% include 'courses/components/quiz_launch_modal.html' %}
+    {% include 'courses/components/inline_confirm.html' %}
+    {% if user.is_authenticated %}
+        <script src="{% static 'courses/js/studyquest_sandbox_unlock.js' %}"></script>
+    {% endif %}
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

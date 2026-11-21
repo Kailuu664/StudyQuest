@@ -1,0 +1,43 @@
+from django.urls import path
+from . import views
+
+app_name = "courses"
+
+urlpatterns = [
+    path("", views.dashboard, name="dashboard"),
+    path("courses/", views.course_list, name="course_list"),
+    path("courses/new/", views.course_create, name="course_create"),
+    path("courses/forge/sandbox/", views.forge_sandbox, name="forge_sandbox"),
+    path("courses/<int:pk>/generating/", views.course_generating, name="course_generating"),
+    path("courses/<int:pk>/generation-status/", views.generation_status, name="generation_status"),
+    path("courses/<int:pk>/retry/", views.course_retry, name="course_retry"),
+    path("courses/<int:pk>/", views.course_detail, name="course_detail"),
+    path("<int:pk>/edit/", views.course_edit, name="course_edit"),
+    path("<int:pk>/delete/", views.course_delete, name="course_delete"),
+    path("<int:pk>/remove-draft/", views.course_remove_draft, name="course_remove_draft"),
+    path("<int:pk>/archive/", views.course_archive, name="course_archive"),
+    path("<int:pk>/restore/", views.course_restore, name="course_restore"),
+    path("chapters/<int:pk>/review/", views.chapter_review, name="chapter_review"),
+    path("chapters/<int:pk>/reading-complete/", views.record_chapter_reading, name="record_chapter_reading"),
+    path("chapters/<int:pk>/complete/", views.complete_chapter, name="complete_chapter"),
+    path("chapters/<int:pk>/rename/", views.chapter_rename, name="chapter_rename"),
+    path("chapters/<int:pk>/quiz/", views.chapter_quiz, name="chapter_quiz"),
+    path("chapters/<int:pk>/quiz/check/", views.check_quiz_answer, name="check_quiz_answer"),
+    path("chapters/<int:pk>/quiz/submit/", views.submit_quiz, name="submit_quiz"),
+    path("profile/", views.profile_view, name="profile"),
+    path("leaderboard/", views.leaderboard_view, name="leaderboard"),
+    path("focus/checkin/", views.focus_checkin, name="focus_checkin"),
+    path("focus/<int:pk>/recommendation/", views.focus_recommendation, name="focus_recommendation"),
+    path("focus/<int:pk>/activate/", views.focus_activate, name="focus_activate"),
+    path("focus/<int:pk>/dismiss/", views.focus_dismiss, name="focus_dismiss"),
+    path("focus/<int:pk>/link-course/<int:course_id>/", views.focus_link_course, name="focus_link_course"),
+    path("focus/<int:pk>/summary/", views.focus_summary, name="focus_summary"),
+    path("focus/<int:pk>/complete/", views.focus_complete, name="focus_complete"),
+    path("focus/<int:pk>/reopen/", views.focus_reopen, name="focus_reopen"),
+    path("focus/catalogue/", views.focus_catalogue_api, name="focus_catalogue_api"),
+    path("courses/<int:course_id>/knowledge-check/", views.knowledge_check_start, name="knowledge_check_start"),
+    path("courses/<int:course_id>/knowledge-check/submit/", views.knowledge_check_submit, name="knowledge_check_submit"),
+    path("courses/<int:course_id>/knowledge-check/results/", views.knowledge_check_results, name="knowledge_check_results"),
+    path("courses/<int:course_id>/knowledge-check/adopt/", views.knowledge_check_adopt_focus, name="knowledge_check_adopt_focus"),
+    path("courses/<int:course_id>/knowledge-check/dismiss/", views.knowledge_check_dismiss, name="knowledge_check_dismiss"),
+]

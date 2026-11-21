@@ -1,0 +1,608 @@
+{% extends 'courses/base.html' %}
+{% load static %}
+
+{% block title %}{{ course.title }} — StudyQuest{% endblock %}
+
+{% block content %}
+<style>
+    /* Header & Action Bar */
+    .course-header-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        align-items: stretch;
+        gap: 20px;
+        margin-bottom: 28px;
+    }
+    .course-header-meta h1 { margin: 0 0 6px; font-size: clamp(1.45rem, 2.4vw, 1.95rem); color: var(--ink); line-height: 1.25; overflow-wrap: anywhere; word-break: normal; }
+    .course-header-meta .subtitle { margin: 0; color: var(--muted); font-size: 0.96rem; max-width: 640px; line-height: 1.5; }
+    
+    .course-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .course-nav-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .course-options-wrap { position: relative; }
+    .course-options-menu { position: absolute; right: 0; top: calc(100% + 8px); z-index: 100; min-width: 190px; display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 12px 32px rgba(0,0,0,.35); }
+    .course-options-menu[hidden] { display: none; }
+    .btn-options-trigger { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; font-size: .86rem; font-weight: 700; cursor: pointer; }
+    .menu-item-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: .86rem; text-align: left; cursor: pointer; }
+    .menu-item-btn:hover { background: rgba(255,255,255,.05); }
+    .menu-item-btn.danger { color: var(--danger); }
+    .menu-divider { height: 1px; margin: 4px 0; background: var(--border); }
+    .course-progress-bar-card { display: flex; flex-direction: column; gap: 8px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+    .progress-labels-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: .82rem; font-weight: 700; }
+    .progress-labels-row strong { color: var(--accent); }
+    .course-progress-track { width: 100%; height: 8px; overflow: hidden; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); }
+    .course-progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--primary),var(--accent)); }
+    .btn-action-pill {
+        display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px;
+        border-radius: 999px; font-size: 0.82rem; font-weight: 700; cursor: pointer;
+        border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+        transition: all 0.15s ease;
+    }
+    .btn-action-pill:hover { border-color: var(--primary); color: var(--primary); }
+    .btn-action-pill.danger:hover { border-color: var(--danger); color: var(--danger); background: rgba(239, 68, 68, 0.08); }
+
+    /* Learning Path Timeline */
+    .path-container { position: relative; margin-top: 24px; padding-left: 8px; }
+    .path-node-row { position: relative; display: flex; gap: 20px; padding-bottom: 32px; }
+    .path-node-row:last-child { padding-bottom: 0; }
+
+    .path-node-row:not(:last-child)::before {
+        content: ''; position: absolute; left: 23px; top: 48px; width: 2px;
+        height: calc(100% - 16px); background: var(--border); z-index: 0;
+    }
+    .path-node-row.completed:not(:last-child)::before { background: var(--accent); }
+
+    .path-circle {
+        position: relative; z-index: 1; width: 48px; height: 48px; border-radius: 50%;
+        background: var(--surface); border: 2px solid var(--border); color: var(--muted);
+        font-weight: 800; font-size: 1.05rem; display: flex; align-items: center;
+        justify-content: center; flex-shrink: 0;
+    }
+    .path-node-row.completed .path-circle { background: var(--accent); border-color: var(--accent); color: #042f2e; }
+    .path-node-row.active .path-circle { background: var(--primary); border-color: var(--primary); color: #fff; box-shadow: 0 0 0 4px rgba(108, 92, 231, 0.18); }
+    .path-node-row.upcoming .path-circle { opacity: 0.55; }
+
+    .path-node-card {
+        flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 18px 20px;
+    }
+    .path-node-row.upcoming .path-node-card { opacity: 0.6; }
+
+    .node-header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+    .path-node-card h3 { margin: 0; font-size: 1.08rem; color: var(--ink); overflow-wrap: anywhere; word-break: normal; }
+
+    .btn-edit-inline {
+        background: transparent; border: none; padding: 2px 6px; font-size: 0.85rem;
+        cursor: pointer; color: var(--muted); border-radius: 6px; transition: color 0.15s ease;
+    }
+    .btn-edit-inline:hover { color: var(--primary); }
+
+    .path-node-status {
+        font-size: 0.76rem; font-weight: 800; color: var(--muted);
+        text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;
+    }
+    .path-node-row.completed .path-node-status { color: var(--accent); }
+    .path-node-row.active .path-node-status { color: var(--primary); }
+
+    .path-node-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .path-pill-btn {
+        display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px;
+        border-radius: 999px; font-size: 0.85rem; font-weight: 700; text-decoration: none;
+        border: 1px solid var(--border); background: var(--bg); color: var(--ink);
+        transition: all 0.15s ease;
+    }
+    .path-pill-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .path-pill-btn.pill-accent { background: rgba(0, 194, 168, 0.12); border-color: rgba(0, 194, 168, 0.3); color: #007a68; }
+
+    /* Modal System */
+    .sq-modal-backdrop {
+        position: fixed; inset: 0; background: rgba(0, 0, 0, 0.65);
+        backdrop-filter: blur(4px); z-index: 1050; display: none;
+        align-items: center; justify-content: center; padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); overflow-y: auto;
+    }
+    .sq-modal-backdrop.open { display: flex; animation: modalFadeIn 0.2s ease; }
+    @keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .sq-modal-box {
+        width: 100%; max-width: 480px; background: var(--surface);
+        border: 1px solid var(--border); border-radius: 18px; padding: 26px;
+        max-height: calc(100dvh - 32px); overflow-y: auto; box-shadow: 0 16px 40px rgba(0,0,0,0.35); animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes modalPop { from { transform: scale(0.95) translateY(10px); } to { transform: scale(1) translateY(0); } }
+
+    .sq-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+    .sq-modal-header h3 { margin: 0; font-size: 1.25rem; color: var(--ink); }
+    .sq-modal-close { background: transparent; border: none; font-size: 1.25rem; color: var(--muted); cursor: pointer; }
+    .sq-modal-close:hover { color: var(--danger); }
+
+    .sq-form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+    .sq-form-group label { font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+    .sq-form-group input, .sq-form-group textarea {
+        padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border);
+        background: var(--bg); color: var(--ink); font-family: inherit; font-size: 0.95rem;
+    }
+    .sq-form-group input:focus, .sq-form-group textarea:focus { outline: none; border-color: var(--primary); }
+
+    .sq-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+    body.sq-modal-open { overflow: hidden; }
+
+    .course-failed-box {
+        max-width: 540px;
+        margin: 40px auto 0;
+        padding: 36px 28px;
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        background: var(--surface);
+        text-align: center;
+    }
+    .failed-badge {
+        width: 48px;
+        height: 48px;
+        margin: 0 auto 16px;
+        border-radius: 50%;
+        background: rgba(239, 68, 68, 0.14);
+        color: var(--danger);
+        font-size: 1.4rem;
+        font-weight: 900;
+        display: grid;
+        place-items: center;
+    }
+    .course-failed-box h3 { margin: 0 0 8px; font-size: 1.25rem; color: var(--ink); }
+    .course-failed-box p { margin: 0 0 24px; font-size: 0.94rem; color: var(--muted); line-height: 1.6; }
+    .failed-actions { display: flex; justify-content: center; gap: 12px; }
+    @media (max-width: 500px) { .failed-actions { flex-direction: column; } }
+
+    @media (max-width: 640px) {
+        .course-nav-bar { align-items: center; gap: 12px; }
+        .course-header-meta h1 { font-size: 1.45rem; }
+        .progress-labels-row { align-items: flex-start; flex-direction: column; gap: 4px; }
+        .node-header-row { align-items: center; }
+        .path-node-actions { flex-direction: column; width: 100%; }
+        .path-node-actions .btn,
+        .path-node-actions .path-pill-btn { width: 100%; min-height: 48px; justify-content: center; }
+        .sq-modal-actions { flex-direction: column-reverse; }
+        .sq-modal-actions .btn { width: 100%; min-height: 48px; }
+    }
+
+</style>
+
+<div class="course-header-wrap">
+    <div class="course-nav-bar">
+        <a href="{% url 'courses:course_list' %}" class="btn btn-ghost" style="padding-left: 0;">&larr; Course Library</a>
+        <div class="course-options-wrap">
+            <button type="button" class="btn-options-trigger" id="course-options-btn" aria-haspopup="true" aria-expanded="false" aria-controls="course-options-menu">Options <span aria-hidden="true">⋮</span></button>
+            <div class="course-options-menu" id="course-options-menu" hidden>
+                <button type="button" class="menu-item-btn" id="open-edit-course-btn"><span aria-hidden="true">✏️</span> Edit Details</button>
+                <form method="post" action="{% url 'courses:course_archive' course.pk %}">{% csrf_token %}<button type="submit" class="menu-item-btn"><span aria-hidden="true">📦</span> Archive Course</button></form>
+                <div class="menu-divider"></div>
+                <button type="button" class="menu-item-btn danger" id="open-delete-course-btn"><span aria-hidden="true">🗑️</span> Delete Course</button>
+            </div>
+        </div>
+    </div>
+    <div class="course-header-meta">
+        <h1>{{ course.title }}</h1>
+        <p class="subtitle">{{ course.description|default:"No description provided." }}</p>
+    </div>
+
+    {% if linked_focus %}
+    <div class="card focus-header-banner" style="
+        background: linear-gradient(135deg, rgba(117, 108, 243, 0.10) 0%, rgba(232, 163, 61, 0.08) 100%), var(--surface);
+        border: 1px solid rgba(117, 108, 243, 0.35);
+        border-radius: 14px;
+        padding: 16px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+    ">
+        <div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span class="badge" style="background: rgba(117, 108, 243, 0.2); color: var(--primary); font-weight: 800; font-size: 0.70rem; text-transform: uppercase; padding: 2px 8px; border-radius: 999px;">
+                    🎯 Active Study Focus
+                </span>
+                {% if linked_focus.initial_score is not None %}
+                    <span style="font-size: 0.75rem; font-weight: 700; color: var(--danger); background: rgba(239, 107, 115, 0.12); padding: 2px 8px; border-radius: 6px;">
+                        Starting Score: {{ linked_focus.initial_score|floatformat:0 }}%
+                    </span>
+                {% endif %}
+                {% if focus_mastery and focus_mastery.is_mastered %}
+                    <span style="font-size: 0.75rem; font-weight: 800; color: var(--accent); background: rgba(0, 194, 168, 0.14); padding: 2px 8px; border-radius: 6px;">
+                        ✓ Goal Reached ({{ focus_mastery.average_score|floatformat:0 }}%)
+                    </span>
+                {% endif %}
+            </div>
+            <div style="font-weight: 800; font-size: 1.05rem; color: var(--ink);">
+                Study Plan for {{ linked_focus.subject_name }}
+            </div>
+            {% if linked_focus.topic_names %}
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; align-items: center;">
+                    <span style="font-size: 0.75rem; color: var(--muted); font-weight: 600;">Priority Topics:</span>
+                    {% for topic in linked_focus.topic_names %}
+                        <span style="font-size: 0.75rem; font-weight: 700; background: rgba(232, 163, 61, 0.15); color: var(--gold); border: 1px solid rgba(232, 163, 61, 0.3); padding: 2px 7px; border-radius: 6px;">
+                            {{ topic }}
+                        </span>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <a href="{% url 'courses:focus_summary' linked_focus.pk %}" class="btn btn-primary btn-sm" style="font-size: 0.8rem;">
+                Progress Report &rarr;
+            </a>
+            <a href="{% url 'courses:focus_recommendation' linked_focus.pk %}" class="btn btn-ghost btn-sm" style="font-size: 0.8rem;">
+                Details
+            </a>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if knowledge_check and knowledge_check.status == 'offered' %}
+    <!-- STARTING KNOWLEDGE CHECK INVITATION (TE-3B) -->
+    <div class="card" style="
+        background: linear-gradient(135deg, rgba(0, 194, 168, 0.12) 0%, rgba(117, 108, 243, 0.10) 100%), var(--surface);
+        border: 1px solid rgba(0, 194, 168, 0.4);
+        border-radius: 16px;
+        padding: 20px 24px;
+        margin-bottom: 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+    ">
+        <div style="flex: 1; min-width: 260px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span class="badge" style="background: rgba(0, 194, 168, 0.2); color: var(--accent); font-weight: 800; font-size: 0.70rem; text-transform: uppercase; padding: 2px 8px; border-radius: 999px;">
+                    ✨ Starting Knowledge Check
+                </span>
+                <span style="font-size: 0.76rem; color: var(--muted); font-weight: 600;">
+                    Optional · {{ knowledge_check.total_questions }} Questions · ~5 Mins
+                </span>
+            </div>
+            <h3 style="font-size: 1.15rem; font-weight: 800; margin: 4px 0 4px; color: var(--ink);">
+                Discover what you already know in {{ course.title }}
+            </h3>
+            <p style="margin: 0; font-size: 0.86rem; color: var(--muted); line-height: 1.45;">
+                Take a quick check to find your starting strengths and get personalized topic recommendations. This check will not affect your course grade.
+            </p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <a href="{% url 'courses:knowledge_check_start' course.pk %}" class="btn btn-primary" style="font-weight: 800; padding: 10px 18px; text-decoration: none; white-space: nowrap;">
+                Start Quick Check →
+            </a>
+            <form method="post" action="{% url 'courses:knowledge_check_dismiss' course.pk %}" style="margin: 0;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-ghost" style="border: 1px solid var(--border); font-size: 0.88rem; font-weight: 700; padding: 10px 16px; white-space: nowrap; cursor: pointer;">
+                    Skip for Now
+                </button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if recommendation and recommendation.has_recommendation %}
+    <!-- RECOMMENDED NEXT STEP (TE-3A / DF-5) -->
+    <div class="card" style="
+        background: linear-gradient(135deg, rgba(117, 108, 243, 0.12) 0%, rgba(232, 163, 61, 0.08) 100%), var(--surface);
+        border: 1px solid rgba(117, 108, 243, 0.35);
+        border-radius: 16px;
+        padding: 20px 24px;
+        margin-bottom: 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+    ">
+        <div style="flex: 1; min-width: 260px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span class="badge" style="background: rgba(117, 108, 243, 0.2); color: var(--primary); font-weight: 800; font-size: 0.70rem; text-transform: uppercase; padding: 2px 8px; border-radius: 999px;">
+                    🎯 {{ recommendation.badge_label|default:"Recommended Next Step" }}
+                </span>
+                {% if recommendation.topic_name %}
+                    <span style="font-size: 0.78rem; color: var(--muted); font-weight: 600;">
+                        Focus Topic
+                    </span>
+                {% endif %}
+            </div>
+            <h3 style="font-size: 1.15rem; font-weight: 800; margin: 4px 0 4px; color: var(--ink);">
+                {{ recommendation.title }}
+            </h3>
+            <p style="margin: 0; font-size: 0.86rem; color: var(--muted); line-height: 1.45;">
+                {{ recommendation.reason }}
+            </p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <a href="{{ recommendation.url }}" class="btn btn-primary" style="font-weight: 800; padding: 10px 18px; text-decoration: none; white-space: nowrap;">
+                {{ recommendation.button_label }}
+            </a>
+            {% if recommendation.secondary_url and recommendation.secondary_button_label %}
+                <a href="{{ recommendation.secondary_url }}" class="btn btn-ghost" style="border: 1px solid var(--border); font-size: 0.88rem; font-weight: 700; padding: 10px 16px; text-decoration: none; white-space: nowrap;">
+                    {{ recommendation.secondary_button_label }}
+                </a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if linked_focus and first_focus_chapter %}
+    <!-- DF-4: CHECK YOUR UNDERSTANDING LAUNCH CARD -->
+    <div class="card" style="
+        background: linear-gradient(135deg, rgba(117, 108, 243, 0.12) 0%, rgba(0, 194, 168, 0.08) 100%), var(--surface);
+        border: 1px solid rgba(117, 108, 243, 0.35);
+        border-radius: 16px;
+        padding: 20px 24px;
+        margin-bottom: 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+    ">
+        <div style="flex: 1; min-width: 260px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span class="badge" style="background: rgba(117, 108, 243, 0.2); color: var(--primary); font-weight: 800; font-size: 0.70rem; text-transform: uppercase; padding: 2px 8px; border-radius: 999px;">
+                    🎯 Check Your Understanding
+                </span>
+                <span style="font-size: 0.78rem; color: var(--muted); font-weight: 600;">
+                    {{ focus_question_count }} questions · Mixed format · About 8 minutes
+                </span>
+            </div>
+            <h3 style="font-size: 1.15rem; font-weight: 800; margin: 4px 0 4px; color: var(--ink);">
+                See how well you understand the topics in your study focus.
+            </h3>
+            <p style="margin: 0; font-size: 0.84rem; color: var(--muted); line-height: 1.4;">
+                Targeted practice prioritized on your focus topics: <strong>{{ linked_focus.topic_names|join:", "|default:linked_focus.subject_name }}</strong>.
+            </p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <a href="{% url 'courses:chapter_review' first_focus_chapter.pk %}#quiz" class="btn btn-primary" style="font-weight: 800; padding: 10px 18px; text-decoration: none;">
+                Start Check &rarr;
+            </a>
+            <a href="{% url 'courses:chapter_review' first_focus_chapter.pk %}" class="btn btn-ghost" style="border: 1px solid var(--border); font-size: 0.88rem; padding: 10px 16px; text-decoration: none;">
+                Review Materials First
+            </a>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="course-progress-bar-card">
+        <div class="progress-labels-row"><span>Course Progress</span><strong>{{ completed_count|default:0 }} of {{ total_chapters|default:0 }} Chapters Completed ({{ course_progress_pct|default:0 }}%)</strong></div>
+        <div class="course-progress-track" role="progressbar" aria-label="Course completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ course_progress_pct|default:0 }}"><div class="course-progress-fill" data-progress="{{ course_progress_pct|default:0 }}"></div></div>
+    </div>
+</div>
+
+<h2>Learning Path</h2>
+
+{% if chapters %}
+    <div class="path-container">
+        {% for chapter in chapters %}
+            <div class="path-node-row {{ chapter.progress_status }}">
+                <div class="path-circle">
+                    {% if chapter.progress_status == 'completed' %}✓{% else %}{{ forloop.counter }}{% endif %}
+                </div>
+                <div class="path-node-card">
+                    <div class="path-node-status">
+                        {% if chapter.progress_status == 'completed' %}Completed
+                        {% elif chapter.progress_status == 'available' %}Available
+                        {% else %}Locked{% endif %}
+                    </div>
+                    <div class="node-header-row">
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <h3>{{ chapter.title }}</h3>
+                            {% if chapter.is_focus_target %}
+                                <span class="badge" style="background: rgba(232, 163, 61, 0.18); color: var(--gold); font-weight: 800; font-size: 0.70rem; border: 1px solid rgba(232, 163, 61, 0.35); padding: 2px 7px; border-radius: 6px;" title="This unit covers focus topics">
+                                    🎯 Focus Target
+                                </span>
+                            {% endif %}
+                        </div>
+                        <button type="button" class="btn-edit-inline rename-chapter-trigger"
+                                data-chapter-id="{{ chapter.pk }}"
+                            data-chapter-title="{{ chapter.title|escape }}"
+                            data-rename-url="{% url 'courses:chapter_rename' chapter.pk %}"
+                            aria-label="Rename {{ chapter.title|escape }}" title="Rename lesson">
+                            ✏️
+                        </button>
+                    </div>
+                    <div class="path-node-actions">
+                        {% if chapter.progress_status == 'locked' %}
+                            <a class="btn action-btn-pill btn-secondary" href="{% url 'courses:chapter_review' chapter.pk %}">
+                                <span aria-hidden="true">🔒</span>
+                                <span>View Unlock Requirements &rarr;</span>
+                            </a>
+                        {% else %}
+                            <a class="btn action-btn-pill btn-secondary" href="{% url 'courses:chapter_review' chapter.pk %}">
+                                <span aria-hidden="true">📖</span>
+                                <span>Review Lesson</span>
+                            </a>
+                            <!-- Check chapter.quiz instead of chapter.has_quiz -->
+                            {% if chapter.quiz or chapter.has_quiz %}
+                                <a class="btn action-btn-pill action-btn-quiz prequiz-trigger"
+                                   href="{% url 'courses:chapter_quiz' chapter.pk %}"
+                                   data-chapter-id="{{ chapter.pk }}"
+                                   data-chapter-order="{{ chapter.order }}"
+                                   data-chapter-title="{{ chapter.title|escape }}"
+                                   data-lesson-completed="{{ chapter.lesson_completed|yesno:'true,false' }}"
+                                   data-quiz-url="{% url 'courses:chapter_quiz' chapter.pk %}"
+                                   data-review-url="{% url 'courses:chapter_review' chapter.pk %}">
+                                    <span aria-hidden="true">⚡</span>
+                                    <span>{% if chapter.quiz_passed %}Retake Quiz{% elif not chapter.lesson_completed %}Try Quiz First{% else %}Take Quiz{% endif %}</span>
+                                </a>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <section class="course-failed-box">
+        <div class="failed-badge">!</div>
+        <h3>Course Generation Interrupted</h3>
+        <p>
+            StudyQuest was unable to generate chapters from the uploaded material. 
+            No lessons were saved for this course draft.
+        </p>
+        <div class="failed-actions">
+            <a href="{% url 'courses:course_create' %}" class="btn btn-primary btn-chunky">
+                Restart Upload &rarr;
+            </a>
+            <button type="button" class="btn btn-secondary" id="open-empty-delete-btn">
+                Delete Draft
+            </button>
+        </div>
+    </section>
+{% endif %}
+
+<!-- 1. EDIT COURSE MODAL -->
+<div class="sq-modal-backdrop" id="edit-course-modal">
+    <div class="sq-modal-box">
+        <div class="sq-modal-header">
+            <h3>Edit Course</h3>
+            <button type="button" class="sq-modal-close" data-close-modal="edit-course-modal">✕</button>
+        </div>
+        <form method="POST" action="{% url 'courses:course_edit' course.pk %}">
+            {% csrf_token %}
+            <div class="sq-form-group">
+                <label for="course-title">Title</label>
+                <input type="text" id="course-title" name="title" value="{{ course.title }}" required>
+            </div>
+            <div class="sq-form-group">
+                <label for="course-desc">Description</label>
+                <textarea id="course-desc" name="description" rows="3">{{ course.description }}</textarea>
+            </div>
+            <div class="sq-modal-actions">
+                <button type="button" class="btn btn-secondary" data-close-modal="edit-course-modal">Cancel</button>
+                <button type="submit" class="btn btn-primary btn-chunky">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 2. DELETE COURSE MODAL -->
+<div class="sq-modal-backdrop" id="delete-course-modal">
+    <div class="sq-modal-box">
+        <div class="sq-modal-header">
+            <h3 style="color: var(--danger);">Delete Course</h3>
+            <button type="button" class="sq-modal-close" data-close-modal="delete-course-modal">✕</button>
+        </div>
+        <p style="color: var(--muted); font-size: 0.95rem; line-height: 1.5; margin: 0 0 20px;">
+            Are you sure you want to delete <strong>{{ course.title }}</strong>? All generated chapters, study materials, and saved quiz results will be permanently removed.
+        </p>
+        <form method="POST" action="{% url 'courses:course_delete' course.pk %}">
+            {% csrf_token %}
+            <div class="sq-modal-actions">
+                <button type="button" class="btn btn-secondary" data-close-modal="delete-course-modal">Cancel</button>
+                <button type="submit" class="btn btn-primary" style="background: var(--danger); border-color: var(--danger);">Delete Course</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 3. RENAME CHAPTER MODAL -->
+<div class="sq-modal-backdrop" id="rename-chapter-modal">
+    <div class="sq-modal-box">
+        <div class="sq-modal-header">
+            <h3>Rename Chapter</h3>
+            <button type="button" class="sq-modal-close" data-close-modal="rename-chapter-modal">✕</button>
+        </div>
+        <form method="POST" id="rename-chapter-form" action="">
+            {% csrf_token %}
+            <div class="sq-form-group">
+                <label for="chapter-title-input">Chapter Title</label>
+                <input type="text" id="chapter-title-input" name="title" required>
+            </div>
+            <div class="sq-modal-actions">
+                <button type="button" class="btn btn-secondary" data-close-modal="rename-chapter-modal">Cancel</button>
+                <button type="submit" class="btn btn-primary btn-chunky">Save Title</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const optionsBtn = document.getElementById('course-options-btn');
+    const optionsMenu = document.getElementById('course-options-menu');
+    optionsBtn?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const isOpen = !optionsMenu.hidden;
+        optionsMenu.hidden = isOpen;
+        optionsBtn.setAttribute('aria-expanded', String(!isOpen));
+    });
+    document.addEventListener('click', (event) => {
+        if (optionsMenu && !optionsMenu.contains(event.target) && !optionsBtn.contains(event.target)) {
+            optionsMenu.hidden = true;
+            optionsBtn?.setAttribute('aria-expanded', 'false');
+        }
+    });
+
+    // Open Modals
+    const editCourseModal = document.getElementById('edit-course-modal');
+    const deleteCourseModal = document.getElementById('delete-course-modal');
+    const renameChapterModal = document.getElementById('rename-chapter-modal');
+    document.getElementById('open-edit-course-btn')?.addEventListener('click', () => {
+        setModalOpen(editCourseModal, true);
+    });
+
+    document.getElementById('open-delete-course-btn')?.addEventListener('click', () => {
+        setModalOpen(deleteCourseModal, true);
+    });
+
+    // Dynamic Chapter Rename Binding
+    const renameForm = document.getElementById('rename-chapter-form');
+    const renameInput = document.getElementById('chapter-title-input');
+
+    document.querySelectorAll('.rename-chapter-trigger').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const chId = btn.dataset.chapterId;
+            const chTitle = btn.dataset.chapterTitle;
+            renameForm.action = btn.dataset.renameUrl;
+            renameInput.value = chTitle;
+            setModalOpen(renameChapterModal, true);
+            renameInput.focus();
+        });
+    });
+
+    // Close Handlers
+    document.querySelectorAll('[data-close-modal]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.closeModal;
+            setModalOpen(document.getElementById(targetId), false);
+        });
+    });
+
+    // Click outside backdrop to close
+    document.querySelectorAll('.sq-modal-backdrop').forEach(backdrop => {
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) setModalOpen(backdrop, false);
+        });
+    });
+
+    // ESC to close
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.sq-modal-backdrop.open').forEach(m => setModalOpen(m, false));
+        }
+    });
+});
+
+function setModalOpen(modal, open) {
+    if (!modal) return;
+    modal.classList.toggle('open', open);
+    document.body.classList.toggle('sq-modal-open', open);
+}
+
+document.querySelectorAll('[data-progress]').forEach(element => {
+    const value = Math.min(Math.max(Number(element.dataset.progress) || 0, 0), 100);
+    element.style.width = `${value}%`;
+});
+
+    document.getElementById('open-empty-delete-btn')?.addEventListener('click', () => {
+    setModalOpen(document.getElementById('delete-course-modal'), true);
+});
+
+</script>
+{% endblock %}
